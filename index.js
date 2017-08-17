@@ -1,8 +1,7 @@
 const osmosis = require('osmosis');
-const mongo = require('mongodb').MongoClient;
+//const mongo = require('mongodb').MongoClient;
 const _ = require('lodash');
 const fs = require('fs');
-const convert = require('convert-string');
 const resultadosURL = 'http://resultados.gob.ar/99/resu/content/telegramas/IPRO.htm';
 const mongoURL = 'mongodb://localhost:27017/telegramas';
 
@@ -17,7 +16,8 @@ function toNumber(number, defaultValue){
 }
 
 function decodeString(string){
-    return convert.UTF8.bytesToString(convert.stringToBytes(string));
+    //UNIDAD PORTEÃÂA
+    return string;
 }
 
 //mongo.connect(mongoURL, function(err, db) {

@@ -10,7 +10,6 @@
   "author": "Prete",
   "license": "MIT",
   "dependencies": {
-    "convert-string": "^0.1.0",
     "lodash": "^4.17.4",
     "mongodb": "^2.2.31",
     "osmosis": "^1.1.4"
