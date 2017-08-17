@@ -1,0 +1,18 @@
+{
+  "name": "scrap-telegramas",
+  "version": "1.0.0",
+  "description": "Scrap telegramas de Elecciones Argentinas del 13 de agosto de 2017",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Prete",
+  "license": "MIT",
+  "dependencies": {
+    "convert-string": "^0.1.0",
+    "lodash": "^4.17.4",
+    "mongodb": "^2.2.31",
+    "osmosis": "^1.1.4"
+  }
+}
