@@ -4,24 +4,15 @@ const mongo = require('mongodb').MongoClient;
 const winston = require('winston');
 const _ = require('lodash');
 const fs = require('fs');
+const config = require('./config.js');
 
 const logger = new (winston.Logger)({
     transports: [
-      new (winston.transports.Console)({ level: 'error' }),
-      new (winston.transports.File)({ name: 'info-file', filename: 'telegramas-info.log', level: 'info' , timestamp: true}),
-      new (winston.transports.File)({ name: 'error-file', filename: 'telegramas-error.log', level: 'error', timestamp: true }),
+      new (winston.transports.Console)({ level: 'info' }),
+      //new (winston.transports.File)({ name: 'info-file', filename: 'telegramas-info.log', level: 'info' , timestamp: true}),
+      //new (winston.transports.File)({ name: 'error-file', filename: 'telegramas-error.log', level: 'error', timestamp: true }),
     ]
 });
-
-const osmosisLogger = new (winston.Logger)({
-    transports: [
-      new (winston.transports.File)({ filename: 'osmosis.log', level: 'silly', timestamp: true})
-    ]
-  });
-
-
-const resultadosURL = 'http://resultados.gob.ar/99/resu/content/telegramas/IPRO.htm';
-const mongoURL = 'mongodb://localhost:27017/telegramas';
 
 function toNumber(number, defaultValue){
     var parsed = Number.parseInt(number);
@@ -39,9 +30,12 @@ function decodeString(string) {
     return iconv.decode(encode2, 'utf8');
 }
 
-mongo.connect(mongoURL, function(err, db) {
 
-    osmosis.get(resultadosURL)          
+mongo.connect(config.mongo.url + config.mongo.db, function (err, db) {
+    
+    let bulk = db.collection(config.mongo.collection).initializeUnorderedBulkOp();
+
+    osmosis.get(config.url)
         .find('div.ulmes ul li a') // provincia selector
         .set('provincia')
         .follow('@href')
@@ -54,17 +48,20 @@ mongo.connect(mongoURL, function(err, db) {
         .find('div.ulmes ul li a') //mesa selector
         .set('mesa')
         .follow('@href')
+        .then((context, data) => {
+            logger.log('info', 'Accediendo a telegrama', data);
+        })
         .find('#contentinfomesa') //telegrama selector    
         .set({
             'categorias': ['.pt1 .tablon thead th:skip(1)'],
             'totales': {
-                'nulos':['.pt1 .tablon tbody  tr:first  td'],
+                'nulos': ['.pt1 .tablon tbody  tr:first  td'],
                 'blancos': ['.pt1 .tablon tbody  tr:skip(1):first  td'],
                 'recurridos': ['.pt1 .tablon tbody  tr:skip(2):first  td'],
                 'impugnados': '.pt2 .tablon tbody tr:first td'
             },
             'detalle': [
-                osmosis.find('#TVOTOS tbody tr:has(th.aladerecha)').set({              
+                osmosis.find('#TVOTOS tbody tr:has(th.aladerecha)').set({
                     'partido': './preceding::th[@class="alaizquierda"][1]',
                     'lista': 'th',
                     'votos': ['td'],
@@ -74,7 +71,7 @@ mongo.connect(mongoURL, function(err, db) {
         .data(telegrama => {
             let votosNulos = _.map(telegrama.totales.nulos, toNumber);
             let votosBlancos = _.map(telegrama.totales.blancos, toNumber);
-            let votosRecurridos = _.map(telegrama.totales.recurridos, toNumber);            
+            let votosRecurridos = _.map(telegrama.totales.recurridos, toNumber);
 
             let resultado = {
                 'provincia': telegrama.provincia,
@@ -88,32 +85,33 @@ mongo.connect(mongoURL, function(err, db) {
                 'detalle': _.map(telegrama.detalle, (voto) => {
                     return {
                         'partido': decodeString(voto.partido),
-                        'lista':  decodeString(voto.lista),
-                        'votos': _.zipObject(telegrama.categorias, _.map(voto.votos, (v) => { return toNumber(v, -1)}))
+                        'lista': decodeString(voto.lista),
+                        'votos': _.zipObject(telegrama.categorias, _.map(voto.votos, (v) => { return toNumber(v, -1) }))
                     };
                 })
             };
 
-
-            fs.writeFile('./telegramas/' + resultado.mesa + '.json', JSON.stringify(resultado), function (err) {
-                if (err) {
-                    logger.log('error', 'Error en mesa ' + resultado.mesa, { error: err, raw: telegrama });
-                } else {
-                    logger.info('Mesa' + resultado.mesa + ' OK.');
-                }
-            });
+            bulk.insert(resultado);
             
-            // db.collection('telegramas').insertOne(resultado, function(err, result) {
-            //     if (err){
-            //         console.log(err);
-            //     }
-            // });
+            if (config.storeInFileSystem){
+                fs.writeFile('./telegramas/' + resultado.mesa + '.json', JSON.stringify(resultado), function (err) {
+                    if (err) {
+                        logger.log('error', 'Error guardando telegrama en file system...', { error: err, raw: telegrama });
+                    } else {
+                        logger.info('[FS] Mesa' + resultado.mesa + ' OK.');
+                    }
+                });
+            }    
         })
-        .log(osmosisLogger.log)
-        .error(osmosisLogger.error)
+        .log(logger.debug)
+        .error(logger.error)
         .done(() => { 
+             bulk.execute(function(err, result) {
+                 if (err) logger.error(err);
+                 logger.info(result);
+            });
             db.close();
-            winston.info('Descarga de datos finalizada');
+            logger.info('Descarga de datos finalizada');
         });
 
 });
