@@ -10,8 +10,10 @@
   "author": "Prete",
   "license": "MIT",
   "dependencies": {
+    "iconv-lite": "^0.4.18",
     "lodash": "^4.17.4",
     "mongodb": "^2.2.31",
-    "osmosis": "^1.1.4"
+    "osmosis": "^1.1.4",
+    "winston": "^2.3.1"
   }
 }

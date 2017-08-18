@@ -1,10 +1,27 @@
 const osmosis = require('osmosis');
-//const mongo = require('mongodb').MongoClient;
+const iconv = require('iconv-lite');
+const mongo = require('mongodb').MongoClient;
+const winston = require('winston');
 const _ = require('lodash');
 const fs = require('fs');
+
+const logger = new (winston.Logger)({
+    transports: [
+      new (winston.transports.Console)({ level: 'error' }),
+      new (winston.transports.File)({ name: 'info-file', filename: 'telegramas-info.log', level: 'info' , timestamp: true}),
+      new (winston.transports.File)({ name: 'error-file', filename: 'telegramas-error.log', level: 'error', timestamp: true }),
+    ]
+});
+
+const osmosisLogger = new (winston.Logger)({
+    transports: [
+      new (winston.transports.File)({ filename: 'osmosis.log', level: 'silly', timestamp: true})
+    ]
+  });
+
+
 const resultadosURL = 'http://resultados.gob.ar/99/resu/content/telegramas/IPRO.htm';
 const mongoURL = 'mongodb://localhost:27017/telegramas';
-
 
 function toNumber(number, defaultValue){
     var parsed = Number.parseInt(number);
@@ -15,18 +32,16 @@ function toNumber(number, defaultValue){
     }
 }
 
-function decodeString(string){
-    //UNIDAD PORTEÃÂA
-    return string;
+function decodeString(string) {
+    //don't ask why double encode then decode, it just works
+    let encode1 = iconv.encode(string, 'latin1');
+    let encode2 = iconv.encode(encode1, 'latin1');
+    return iconv.decode(encode2, 'utf8');
 }
 
-//mongo.connect(mongoURL, function(err, db) {
+mongo.connect(mongoURL, function(err, db) {
 
-    osmosis.get('http://resultados.gob.ar/99/resu/content/telegramas/01/001/0001/010010001_00001.htm'/*resultadosURL*/)          
-        .config('Content-Type','text/html; charset=utf-8') 
-        .config('Accept','text/html; charset=utf-8')
-        .config('Accept-Charset','utf-8')
-        /*
+    osmosis.get(resultadosURL)          
         .find('div.ulmes ul li a') // provincia selector
         .set('provincia')
         .follow('@href')
@@ -39,7 +54,6 @@ function decodeString(string){
         .find('div.ulmes ul li a') //mesa selector
         .set('mesa')
         .follow('@href')
-        */       
         .find('#contentinfomesa') //telegrama selector    
         .set({
             'categorias': ['.pt1 .tablon thead th:skip(1)'],
@@ -81,25 +95,25 @@ function decodeString(string){
             };
 
 
-            fs.writeFile(resultado.mesa+'.json', JSON.stringify( resultado ), function(err) {
-                if(err) console.error(err);                
-            })
+            fs.writeFile('./telegramas/' + resultado.mesa + '.json', JSON.stringify(resultado), function (err) {
+                if (err) {
+                    logger.log('error', 'Error en mesa ' + resultado.mesa, { error: err, raw: telegrama });
+                } else {
+                    logger.info('Mesa' + resultado.mesa + ' OK.');
+                }
+            });
             
             // db.collection('telegramas').insertOne(resultado, function(err, result) {
             //     if (err){
             //         console.log(err);
             //     }
             // });
-
-            console.log(resultado.detalle);
-
         })
-        .log(console.log)
-        .debug(console.log)
-        .error(console.log)
+        .log(osmosisLogger.log)
+        .error(osmosisLogger.error)
         .done(() => { 
-            //db.close();
-            console.log('finalizado @ '+(new Date).toISOString());
+            db.close();
+            winston.info('Descarga de datos finalizada');
         });
 
-//});
+});
