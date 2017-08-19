@@ -7,11 +7,24 @@ const fs = require('fs');
 const config = require('./config.js');
 
 //inicializar logger para revisar eventos
+const transports = [];
+transports.push(
+    new (winston.transports.File)({
+        filename: 'telegramas.log',
+        level: config.log.fileLogLevel,
+        timestamp: true
+    })
+);
+if (!config.log.quiet) {
+  transports.push(    
+      new (winston.transports.Console)({
+          level: config.log.consoleLogLevel,
+          timestamp: true
+      })
+    );  
+}
 const logger = new (winston.Logger)({
-    transports: [
-      new (winston.transports.Console)({ level: 'info' }),
-      new (winston.transports.File)({ name: 'error-file', filename: 'telegramas-error.log', level: 'error', timestamp: true }),
-    ]
+    transports: transports
 });
 
 //conversion de string a numeros (valor por defecto 0)
@@ -32,15 +45,18 @@ function decodeString(string) {
     return iconv.decode(encode2, 'utf8');
 }
 
+console.log("Iniciando proceso. Sera notificado cada 1000 mesas. Para mas información deshabilitar config.log.quiet");
 
 //conexion con mmongo
 mongo.connect(config.mongo.url + config.mongo.db, function (err, db) {
     
     //inicializacion de bulk insert para guardar telegramas en db
     let bulk = db.collection(config.mongo.collection).initializeUnorderedBulkOp();
+    let bulkErrors = db.collection("telegramasNoCargados").initializeUnorderedBulkOp();
     
-    //varaible para llevar registor de la mesa actual
-    let currentMesa;
+    //varaible para llevar registor de Provicina/Seccion/Cirtuito/Mesa actual
+    let currentPSCM;
+    let counter = 0;
 
     //get de la URL base
     osmosis.get(config.url)
@@ -57,11 +73,13 @@ mongo.connect(config.mongo.url + config.mongo.db, function (err, db) {
         .set('mesa')
         .follow('@href')        
         .then((context, data) => { 
-            //registrar mesa actual
-            currentMesa = data;
+            //registrar Provicina/Seccion/Cirtuito/Mesa actual
+            currentPSCM = data;
         })
         //telegrama selector
         //las mesas no cargadas tiran error de #contentinfomesa not found
+        //RANT: No se transcriben del PDF los campos "Cantidad de electores que han votado",
+        //      "Cantidad de sobres en la urna" ni "Diferencia" 
         .find('#contentinfomesa')
         .set({
             'categorias': ['.pt1 .tablon thead th:skip(1)'],
@@ -91,15 +109,36 @@ mongo.connect(config.mongo.url + config.mongo.db, function (err, db) {
                 'seccion': telegrama.seccion,
                 'circuito': telegrama.circuito,
                 'mesa': telegrama.mesa,
-                'blancos': _.zipObject(telegrama.categorias, votosBlancos),
-                'nulos': _.zipObject(telegrama.categorias, votosNulos),
-                'recurridos': _.zipObject(telegrama.categorias, votosRecurridos),
+                'blancos': {
+                    'porCategoria': _.map(_.zipObject(telegrama.categorias, votosBlancos), (value, key) => ({
+                        'categoria': key,
+                        'votos': value
+                    })),
+                    'totales:': _.sum(votosBlancos)
+                },
+                'nulos': {
+                    'porCategoria': _.map(_.zipObject(telegrama.categorias, votosNulos), (value, key) => ({
+                        'categoria': key,
+                        'votos': value
+                    })),
+                    'totales:': _.sum(votosNulos)
+                },
+                'recurridos': {
+                    'porCategoria': _.map( _.zipObject(telegrama.categorias, votosRecurridos), (value, key) => ({
+                        'categoria': key,
+                        'votos': value
+                    })),
+                    'totales:': _.sum(votosNulos)
+                },
                 'impugnados': toNumber(telegrama.totales.impugnados),
                 'detalle': _.map(telegrama.detalle, (voto) => {
                     return {
                         'partido': decodeString(voto.partido),
                         'lista': decodeString(voto.lista),
-                        'votos': _.zipObject(telegrama.categorias, _.map(voto.votos, (v) => { return toNumber(v, -1) }))
+                        'votos': _.map( _.zipObject(telegrama.categorias, _.map(voto.votos, (v) => { return toNumber(v, -1) })), (value, key) => ({
+                            'categoria': key,
+                            'votos': value,
+                        })),
                     };
                 })
             };
@@ -107,7 +146,7 @@ mongo.connect(config.mongo.url + config.mongo.db, function (err, db) {
             //bulk insert para acelerar el proceso de guardado en db
             bulk.insert(resultado);
             
-            //guardar a disco
+            //guardar a disco (para habilitar modificar config.js)
             if (config.storeInFileSystem){
                 fs.writeFile('./telegramas/' + resultado.mesa + '.json', JSON.stringify(resultado), function (err) {
                     //controlar errores en storage
@@ -117,23 +156,43 @@ mongo.connect(config.mongo.url + config.mongo.db, function (err, db) {
                         logger.log('info', 'Mesa' + resultado.mesa + ' OK.');
                     }
                 });
-            }    
+            }
+            
+            //conteo de telegramas scrapeados
+            counter++;
+            if (counter % 1000 == 0) {
+                console.info("Mesas scrapeadas: " + counter + "[~"+(counter/100000).toFixed(2)+"%]");
+            }
+
         })
+        .log(logger.debug)
         .error((err) => {
-            //log de errores
-            logger.log('error', err, currentMesa);
+            //log de scrap errors
+            logger.log('error', err, currentPSCM);
+            bulkErrors.insert(currentPSCM);
         })
         .done(() => { 
+            logger.log('info','Scrap de datos finalizado');
+
             //al finalizar el scraping ejecutar bulk insert
-             bulk.execute(function(err, result) {
-                 if (err) {
-                     logger.log('error', 'Error guardado telegramas en db.', err);
-                 }
-                 logger.log('info', 'Bulk insert result: '+ result);
-            });
-            //cerrar conexion con mongo
-             db.close();
-            
-            logger.log('info','Descarga de datos finalizada');
+            bulk.execute(function(err, result) {
+                if (err) {
+                    logger.log('error', 'Error guardado telegramas en db.', err);
+                }
+                logger.log('info', 'Bulk insert result: ' + JSON.stringify(result));
+
+                //bulk insert errors
+                bulkErrors.execute(function(err, result) {
+                    if (err) {
+                        logger.log('error', 'Error guardado errores de telegramas en db.', err);
+                    }
+                    logger.log('info', 'Bulk Error insert result: ' + JSON.stringify(result));
+                    //cerrar conexion con mongo
+                    db.close();
+                    
+                    //guardado de datos finalizado
+                    logger.log('info', 'Guardado de datos finalizado. Total', {'Total': counter});
+                });
+            });            
         });
 });

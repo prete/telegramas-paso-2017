@@ -8,6 +8,12 @@ config.mongo = {
     collection: 'telegramas'
 };
 
-config.storeInFileSystem = true;
+config.storeInFileSystem = false;
+
+config.log = {
+    fileLogLevel: 'error',
+    consoleLogLevel: 'info',
+    quiet: true
+};
 
 module.exports = config;
