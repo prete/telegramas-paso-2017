@@ -8,6 +8,6 @@ config.mongo = {
     collection: 'telegramas'
 };
 
-config.storeInFileSystem = false;
+config.storeInFileSystem = true;
 
 module.exports = config;
