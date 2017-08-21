@@ -10,10 +10,12 @@
   "author": "Prete",
   "license": "MIT",
   "dependencies": {
+    "bluebird": "^3.5.0",
     "iconv-lite": "^0.4.18",
     "lodash": "^4.17.4",
     "mongodb": "^2.2.31",
     "osmosis": "^1.1.4",
+    "progress": "^2.0.0",
     "winston": "^2.3.1"
   }
 }
