@@ -8,7 +8,7 @@ const ProgressBar = require('progress');
 
 //conversion de string a numeros (valor por defecto 0)
 function toNumber(number, defaultValue){
-    var parsed = Number.parseFloat(number);
+    var parsed = Number.parseInt(number);
     if(Number.isInteger(parsed)){
         return parsed;
     }else{
@@ -93,21 +93,21 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
                             'categoria': key,
                             'votos': value
                         })),
-                        'totales:': _.sum(votosBlancos)
+                        'totales': _.sum(votosBlancos)
                     },
                     'nulos': {
                         'porCategoria': _.map(_.zipObject(telegrama.categorias, votosNulos), (value, key) => ({
                             'categoria': key,
                             'votos': value
                         })),
-                        'totales:': _.sum(votosNulos)
+                        'totales': _.sum(votosNulos)
                     },
                     'recurridos': {
                         'porCategoria': _.map(_.zipObject(telegrama.categorias, votosRecurridos), (value, key) => ({
                             'categoria': key,
                             'votos': value
                         })),
-                        'totales:': _.sum(votosNulos)
+                        'totales': _.sum(votosNulos)
                     },
                     'impugnados': toNumber(telegrama.totales.impugnados),
                     'detalle': _.map(telegrama.detalle, (voto) => {
