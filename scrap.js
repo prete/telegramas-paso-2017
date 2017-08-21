@@ -7,7 +7,7 @@ const Promise = require('bluebird');
 const ProgressBar = require('progress');
 
 //conversion de string a numeros (valor por defecto 0)
-function toNumber(number, defaultValue){
+function toNumber(number, defaultValue) {
     var parsed = Number.parseInt(number);
     if(Number.isInteger(parsed)){
         return parsed;
