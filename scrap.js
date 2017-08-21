@@ -55,6 +55,9 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
             .then((context, data) => {
                 //registrar Provicina/Seccion/Cirtuito/Mesa actual
                 currentPSCM = data;
+                counter++;         
+                //conteo de telegramas scrapeados
+                bar.tick();
             })            
             //las mesas no cargadas tiran error de #contentinfomesa not found
             //RANT: No se transcriben del PDF los campos "Cantidad de electores que han votado",
@@ -140,10 +143,6 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
                         }
                     });
                 }
-                
-                //conteo de telegramas scrapeados
-                counter++;
-                bar.tick();
             })
             .log(logger.debug)
             .error((err) => {

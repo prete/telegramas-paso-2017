@@ -26,8 +26,8 @@ const logger = new (winston.Logger)({
     transports: transports
 });
 
-console.log("Iniciando scrap.");
-console.log("\tURL:"+config.url);
+console.log("Iniciando scrap");
+console.log("URL: "+config.url);
 
 //conexion con mongo
 const db = mongo.connect(config.mongo.url + config.mongo.db);
