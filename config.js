@@ -15,9 +15,7 @@ config.storage = {
 }
 
 config.log = {
-    fileLogLevel: 'error',
-    consoleLogLevel: 'info',
-    quiet: true
+    level: 'error'
 };
 
 config.aproxTotalTelegramas = 98084;

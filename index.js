@@ -10,18 +10,11 @@ const transports = [];
 transports.push(
     new (winston.transports.File)({
         filename: 'telegramas.log',
-        level: config.log.fileLogLevel,
+        level: config.log.level,
         timestamp: true
     })
 );
-if (!config.log.quiet) {
-  transports.push(    
-      new (winston.transports.Console)({
-          level: config.log.consoleLogLevel,
-          timestamp: true
-      })
-    );  
-}
+
 const logger = new (winston.Logger)({
     transports: transports
 });
@@ -33,27 +26,23 @@ console.log("URL: "+config.url);
 const db = mongo.connect(config.mongo.url + config.mongo.db);
 
 db.then(db => {
-    //inicializacion de bulk insert para guardar telegramas en db
-    let bulkTelegramas = db.collection(config.mongo.successCollection).initializeUnorderedBulkOp();
-    let bulkErrors = db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp();
-    
     //scrap
-    scraper.start(logger, bulkTelegramas, bulkErrors).then(() => {
+    scraper.start(logger, db).then((bulks) => {
         consoe.log('Insertando en db...');
         //store
         Promise.all([
-            // inserta los telegramas    
-            bulkTelegramas.execute(),
-            // inserta los telegramas con error (no cargados)
-            bulkErrors.execute()
+            //los telegramas y errores se guardan cada 1000 en db
+            //los restantes se guardan con esta llamada
+            bulks.bulkTelegramas.execute(),
+            bulks.bulkErrors.execute()
         ]).then(results => {
-            logger.log('info', 'Bulk insert result: ' + JSON.stringify(results[0]));
-            logger.log('info', 'Bulk Error insert result: ' + JSON.stringify(results[1]));
+            console.info('Bulk insert result: ' + JSON.stringify(results[0]));
+            console.info('Bulk Error insert result: ' + JSON.stringify(results[1]));
         }).catch(error => {
             logger.log('error', 'Error guardado telegramas en db.', error);
-            }).finally(() => {
+        }).finally(() => {
             if(db) db.close();
-            logger.log('info', 'Proceso finalizado');
+            console.info('Proceso finalizado');
         });
     });
 });

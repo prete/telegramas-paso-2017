@@ -24,17 +24,23 @@ function decodeString(string) {
     return iconv.decode(encode2, 'utf8');
 }
 
-function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
+function releaseTheKraken(logger, db) {
+
+    //inicializacion de bulk insert para guardar telegramas en db
+    let bulkTelegramas = db.collection(config.mongo.successCollection).initializeUnorderedBulkOp();
+    let bulkErrors = db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp();    
 
     return new Promise((resolve, reject) => {
         //varaible para llevar registor de Provicina/Seccion/Cirtuito/Mesa actual
         let curentPSCM;
         //varaibles para mostrar avance
         let counter = 0;
-        let bar = new ProgressBar('Procesando [:bar] :percent (:current/:total) @:rate/tps  faltan::etas', {
+        let errorCounter = 0;
+        let successCounter = 0;
+        let bar = new ProgressBar('Procesando [:bar] :percent [:current/:total] [@:rate/tps] [:etas]', {
             complete: '=',
             incomplete: ' ',
-            width: 40,
+            width: 30,
             total: config.aproxTotalTelegramas
         });
                         
@@ -92,24 +98,21 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
                     'circuito': telegrama.circuito,
                     'mesa': telegrama.mesa,
                     'blancos': {
-                        'porCategoria': _.map(_.zipObject(telegrama.categorias, votosBlancos), (value, key) => ({
-                            'categoria': key,
-                            'votos': value
-                        })),
+                        'porCategoria': _.zipWith(telegrama.categorias, votosBlancos, (categoria, votos) => {
+                            return { 'categoria': categoria, 'votos': votos };
+                        }),
                         'totales': _.sum(votosBlancos)
                     },
                     'nulos': {
-                        'porCategoria': _.map(_.zipObject(telegrama.categorias, votosNulos), (value, key) => ({
-                            'categoria': key,
-                            'votos': value
-                        })),
+                        'porCategoria': _.zipWith(telegrama.categorias, votosNulos, (categoria, votos) => {
+                            return { 'categoria': categoria, 'votos': votos };
+                        }),
                         'totales': _.sum(votosNulos)
                     },
                     'recurridos': {
-                        'porCategoria': _.map(_.zipObject(telegrama.categorias, votosRecurridos), (value, key) => ({
-                            'categoria': key,
-                            'votos': value
-                        })),
+                        'porCategoria': _.zipWith(telegrama.categorias, votosRecurridos, (categoria, votos) => {
+                            return { 'categoria': categoria, 'votos': votos };
+                        }),
                         'totales': _.sum(votosNulos)
                     },
                     'impugnados': toNumber(telegrama.totales.impugnados),
@@ -118,10 +121,11 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
                             'partido': decodeString(voto.partido),
                             'lista': decodeString(voto.lista),
                             'totalesPorLista': _.sum(_.map(voto.votos, (v) => { return toNumber(v) })),
-                            'votosPorCategoria': _.filter(_.map(
+                            'votosPorCategoria': _.filter(
                                 //agrupar votos por categoria
-                                _.zipObject(telegrama.categorias, _.map(voto.votos, (v) => { return toNumber(v, -1) })),
-                                (value, key) => ({ 'categoria': key, 'votos': value })),
+                                _.zipWith(telegrama.categorias, voto.votos, (categoria, votos) => {
+                                    return { 'categoria': categoria, 'votos': toNumber(votos, -1) };
+                                }),
                                 //remover las categorias que no participan (marcadas con votos: -1)                            
                                 (vc) => { return vc.votos != -1 }
                             )
@@ -131,16 +135,20 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
 
                 //bulk insert para acelerar el proceso de guardado en db
                 bulkTelegramas.insert(resultado);
+                successCounter++;
                 
+                if (successCounter % 1000 == 0) { 
+                    bulkTelegramas.execute().then(result => {
+                        logger.log('info', 'Guardado batch de telegramas', result);
+                    });
+                    bulkTelegramas = db.collection(config.mongo.successCollection).initializeUnorderedBulkOp();
+                }
+
                 //guardar a disco (para habilitar modificar config.js)
                 if (config.storage.enabled) {
                     fs.writeFile(config.storage.path + resultado.mesa + '.json', JSON.stringify(resultado), function (err) {
                         //controlar errores en storage
-                        if (err) {
-                            logger.log('error', 'Error guardando telegrama en file system.', { error: err, raw: telegrama });
-                        } else {
-                            logger.log('info', 'Mesa' + resultado.mesa + ' OK.');
-                        }
+                        if (err) logger.log('error', 'Error guardando telegrama en file system.', { error: err, raw: telegrama });
                     });
                 }
             })
@@ -149,12 +157,23 @@ function releaseTheKraken(logger, bulkTelegramas, bulkErrors) {
                 //log de scrap errors
                 logger.log('error', err, currentPSCM);
                 bulkErrors.insert(currentPSCM);
+                errorCounter++;
+
+                if (errorCounter % 1000 == 0) { 
+                    bulkErrors.execute().then(result => {
+                        logger.log('info', 'Guardado batch de telegramas fallidos', result);
+                    });
+                    bulkErrors = db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp();
+                }
             })
             .done(() => {
-                console.log('\n');
-                logger.log('info', 'Scrap de datos finalizado', { 'Counter': counter });
+                bar.interrupt('Scrap de datos finalizado.');
+                console.log('\n\n');
                 //finalizar el scraping
-                resolve();
+                resolve({
+                    'bulkTelegramas': bulkTelegramas,
+                    'bulkErrors': bulkErrors
+                });
             });
     });
 };
