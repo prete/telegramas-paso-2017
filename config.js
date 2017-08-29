@@ -15,9 +15,10 @@ config.storage = {
 }
 
 config.log = {
-    level: 'error'
+    level: 'info'
 };
 
+//Segun Gustavo Mason (subdirector de la Cámara Nacional Electoral)
 config.aproxTotalTelegramas = 98084;
 
 module.exports = config;
