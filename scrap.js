@@ -31,8 +31,7 @@ function releaseTheKraken(logger, db) {
         //inicializacion de bulk insert para guardar telegramas en db
         let bulk = {
             telegramas: db.collection(config.mongo.successCollection).initializeUnorderedBulkOp(),
-            errors: db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp()/*,
-            debug: db.collection("followedURLs").initializeUnorderedBulkOp()*/
+            errors: db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp()
         };
         
         //varaible para llevar registor de Provicina/Seccion/Cirtuito/Mesa actual
@@ -175,12 +174,7 @@ function releaseTheKraken(logger, db) {
                     bulk.errors.execute((err, result) => {
                         resolve(result);
                     })
-                }));/*
-                executed.push(new Promise((resolve, reject) => {
-                    bulk.debug.execute((err, result) => {
-                        resolve(result);
-                    })
-                }));*/
+                }));
 
                 //finalizar el scraping
                 resolve(executed);
