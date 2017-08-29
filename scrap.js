@@ -26,17 +26,19 @@ function decodeString(string) {
 
 function releaseTheKraken(logger, db) {
 
-    //inicializacion de bulk insert para guardar telegramas en db
-    let bulkTelegramas = db.collection(config.mongo.successCollection).initializeUnorderedBulkOp();
-    let bulkErrors = db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp();    
-
     return new Promise((resolve, reject) => {
+
+        //inicializacion de bulk insert para guardar telegramas en db
+        let bulk = {
+            telegramas: db.collection(config.mongo.successCollection).initializeUnorderedBulkOp(),
+            errors: db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp()/*,
+            debug: db.collection("followedURLs").initializeUnorderedBulkOp()*/
+        };
+        
         //varaible para llevar registor de Provicina/Seccion/Cirtuito/Mesa actual
         let curentPSCM;
+        
         //varaibles para mostrar avance
-        let counter = 0;
-        let errorCounter = 0;
-        let successCounter = 0;
         let bar = new ProgressBar('Procesando [:bar] :percent [:current/:total] [@:rate/tps] [:etas]', {
             complete: '=',
             incomplete: ' ',
@@ -57,19 +59,25 @@ function releaseTheKraken(logger, db) {
             .follow('@href')
             .find('div.ulmes ul li a') //mesa selector
             .set('mesa')
-            .follow('@href')
+            .set({ 'href':'@href'})
             .then((context, data) => {
                 //registrar Provicina/Seccion/Cirtuito/Mesa actual
-                currentPSCM = data;
-                counter++;         
+                currentPSCM = data; 
+                //registro
+                //bulk.debug.insert(data);
+                logger.log('info', "link data", data);
                 //conteo de telegramas scrapeados
                 bar.tick();
-            })            
+            })
+            .follow('@href')
             //las mesas no cargadas tiran error de #contentinfomesa not found
             //RANT: No se transcriben del PDF los campos "Cantidad de electores que han votado",
             //      "Cantidad de sobres en la urna" ni "Diferencia" 
             .find('#contentinfomesa') //telegrama selector
             .set({
+                'href': '@href',
+                'estado': '.altreinta table tbody tr:last td',
+                //RANT: No se transcriben del PDF las categorias municipales
                 'categorias': ['.pt1 .tablon thead th:skip(1)'],
                 'totales': {
                     'nulos': ['.pt1 .tablon tbody  tr:first  td'],
@@ -85,7 +93,7 @@ function releaseTheKraken(logger, db) {
                     })
                 ]
             })
-            .data(telegrama => {
+            .data((telegrama) => {
                 //votos nulos/blancos/impugnados
                 let votosNulos = _.map(telegrama.totales.nulos, toNumber);
                 let votosBlancos = _.map(telegrama.totales.blancos, toNumber);
@@ -93,6 +101,8 @@ function releaseTheKraken(logger, db) {
 
                 //procesar telegrama
                 let resultado = {
+                    'estado': telegrama.estado,
+                    'href': 'http://resultados.gob.ar/99/resu/content/telegramas/'+telegrama.href,
                     'provincia': telegrama.provincia,
                     'seccion': telegrama.seccion,
                     'circuito': telegrama.circuito,
@@ -134,16 +144,8 @@ function releaseTheKraken(logger, db) {
                 };
 
                 //bulk insert para acelerar el proceso de guardado en db
-                bulkTelegramas.insert(resultado);
-                successCounter++;
+                bulk.telegramas.insert(resultado);
                 
-                if (successCounter % 1000 == 0) { 
-                    bulkTelegramas.execute().then(result => {
-                        logger.log('info', 'Guardado batch de telegramas', result);
-                    });
-                    bulkTelegramas = db.collection(config.mongo.successCollection).initializeUnorderedBulkOp();
-                }
-
                 //guardar a disco (para habilitar modificar config.js)
                 if (config.storage.enabled) {
                     fs.writeFile(config.storage.path + resultado.mesa + '.json', JSON.stringify(resultado), function (err) {
@@ -152,28 +154,36 @@ function releaseTheKraken(logger, db) {
                     });
                 }
             })
-            .log(logger.debug)
+            //.log(logger.debug)
             .error((err) => {
                 //log de scrap errors
                 logger.log('error', err, currentPSCM);
-                bulkErrors.insert(currentPSCM);
-                errorCounter++;
-
-                if (errorCounter % 1000 == 0) { 
-                    bulkErrors.execute().then(result => {
-                        logger.log('info', 'Guardado batch de telegramas fallidos', result);
-                    });
-                    bulkErrors = db.collection(config.mongo.errorCollection).initializeUnorderedBulkOp();
-                }
+                bulk.errors.insert(currentPSCM);
             })
             .done(() => {
-                bar.interrupt('Scrap de datos finalizado.');
-                console.log('\n\n');
+                console.log('Scrap de datos finalizado.');
+ 
+                console.log('Insertando en db...');
+                //store telegramas y errores se guardan con esta llamada
+                let executed = [];
+                executed.push(new Promise((resolve, reject) => {
+                    bulk.telegramas.execute((err, result) => {
+                        resolve(result);
+                    })
+                }));
+                executed.push(new Promise((resolve, reject) => {
+                    bulk.errors.execute((err, result) => {
+                        resolve(result);
+                    })
+                }));/*
+                executed.push(new Promise((resolve, reject) => {
+                    bulk.debug.execute((err, result) => {
+                        resolve(result);
+                    })
+                }));*/
+
                 //finalizar el scraping
-                resolve({
-                    'bulkTelegramas': bulkTelegramas,
-                    'bulkErrors': bulkErrors
-                });
+                resolve(executed);
             });
     });
 };
